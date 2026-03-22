@@ -1,4 +1,2 @@
 
-- [CHANGE] - Update pt_br.json
-- [CHANGE] - Guard inventory now has heart and armor images instead of just pure numbers
-- [CHANGE] - fix #255 (guards not patrolling properly near villages)
+- [MAJOR] 1.21.11 port (special thanks to zzong8286-crypto on github for helping out with the majority of this)- [CHANGE] guards can use spears and added bows and iron axes to guard equipment selection

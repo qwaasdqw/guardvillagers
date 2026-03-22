@@ -1,9 +1,12 @@
 package tallestegg.guardvillagers;
 
+import net.minecraft.core.Registry;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.entity.raid.Raid;
 import net.minecraft.world.item.CreativeModeTabs;
+import net.minecraft.world.level.levelgen.structure.pools.StructureTemplatePool;
+import net.minecraft.world.level.levelgen.structure.templatesystem.StructureProcessorList;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -11,21 +14,16 @@ import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
-import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.client.gui.ConfigurationScreen;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
 import net.neoforged.neoforge.event.entity.EntityAttributeCreationEvent;
-import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
-import net.neoforged.neoforge.network.registration.PayloadRegistrar;
+import net.neoforged.neoforge.event.server.ServerAboutToStartEvent;
 import tallestegg.guardvillagers.client.GuardSounds;
 import tallestegg.guardvillagers.common.entities.Guard;
 import tallestegg.guardvillagers.configuration.GuardConfig;
 import tallestegg.guardvillagers.loot_tables.GuardLootTables;
-import tallestegg.guardvillagers.networking.GuardFollowPacket;
-import tallestegg.guardvillagers.networking.GuardOpenInventoryPacket;
-import tallestegg.guardvillagers.networking.GuardSetPatrolPosPacket;
 
 @Mod(GuardVillagers.MODID)
 public class GuardVillagers {
@@ -43,17 +41,10 @@ public class GuardVillagers {
         GuardLootTables.LOOT_ITEM_CONDITION_TYPES.register(modEventBus);
         GuardLootTables.LOOT_ITEM_FUNCTION_TYPES.register(modEventBus);
         GuardStats.STATS.register(modEventBus);
+        GuardDataAttachments.ATTACHMENT_TYPES.register(modEventBus);
+        NeoForge.EVENT_BUS.addListener(this::serverStart);
         modEventBus.addListener(this::addAttributes);
         modEventBus.addListener(this::addCreativeTabs);
-        modEventBus.addListener(this::register);
-    }
-
-
-    private void register(final RegisterPayloadHandlersEvent event) {
-        PayloadRegistrar reg = event.registrar(MODID).versioned("2.0.2");
-        reg.playToServer(GuardSetPatrolPosPacket.TYPE, GuardSetPatrolPosPacket.STREAM_CODEC, GuardSetPatrolPosPacket::setPatrolPosition);
-        reg.playToClient(GuardOpenInventoryPacket.TYPE, GuardOpenInventoryPacket.STREAM_CODEC, GuardOpenInventoryPacket::handle);
-        reg.playToServer(GuardFollowPacket.TYPE, GuardFollowPacket.STREAM_CODEC, GuardFollowPacket::handle);
     }
 
     public static boolean hotvChecker(Player player, Guard guard) {
@@ -90,6 +81,12 @@ public class GuardVillagers {
         else
             return parts[1];
     }
+
+    private void serverStart(final ServerAboutToStartEvent event) {
+        Registry<StructureTemplatePool> templatePoolRegistry = event.getServer().registryAccess().lookupOrThrow(Registries.TEMPLATE_POOL);
+        Registry<StructureProcessorList> processorListRegistry = event.getServer().registryAccess().lookupOrThrow(Registries.PROCESSOR_LIST);
+    }
+
 
     @Mod(value = GuardVillagers.MODID, dist = Dist.CLIENT)
     public static class GuardVillagersClient {

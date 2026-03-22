@@ -1,23 +1,19 @@
 package tallestegg.guardvillagers.common.entities;
 
 import com.google.common.collect.ImmutableMap;
-import com.mojang.serialization.Dynamic;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.NbtOps;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
+import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
-import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.util.TimeUtil;
@@ -41,20 +37,25 @@ import net.minecraft.world.entity.ai.navigation.GroundPathNavigation;
 import net.minecraft.world.entity.ai.navigation.PathNavigation;
 import net.minecraft.world.entity.ai.targeting.TargetingConditions;
 import net.minecraft.world.entity.ai.util.DefaultRandomPos;
+import net.minecraft.world.entity.ai.util.LandRandomPos;
 import net.minecraft.world.entity.ai.village.ReputationEventType;
-import net.minecraft.world.entity.animal.IronGolem;
-import net.minecraft.world.entity.animal.PolarBear;
+import net.minecraft.world.entity.animal.golem.IronGolem;
+import net.minecraft.world.entity.animal.polarbear.PolarBear;
 import net.minecraft.world.entity.monster.*;
-import net.minecraft.world.entity.npc.AbstractVillager;
-import net.minecraft.world.entity.npc.Villager;
-import net.minecraft.world.entity.npc.VillagerProfession;
-import net.minecraft.world.entity.npc.VillagerType;
+import net.minecraft.world.entity.monster.zombie.Zombie;
+import net.minecraft.world.entity.monster.zombie.ZombieVillager;
+import net.minecraft.world.entity.monster.zombie.ZombifiedPiglin;
+import net.minecraft.world.entity.npc.villager.AbstractVillager;
+import net.minecraft.world.entity.npc.villager.Villager;
+import net.minecraft.world.entity.npc.villager.VillagerType;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.entity.projectile.AbstractArrow;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
+import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
 import net.minecraft.world.entity.raid.Raider;
 import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.item.*;
+import net.minecraft.world.item.component.BlocksAttacks;
+import net.minecraft.world.item.component.KineticWeapon;
 import net.minecraft.world.item.enchantment.EnchantmentEffectComponents;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.level.Level;
@@ -66,22 +67,21 @@ import net.minecraft.world.level.pathfinder.Node;
 import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.level.pathfinder.PathType;
 import net.minecraft.world.level.pathfinder.WalkNodeEvaluator;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.level.storage.loot.LootParams;
 import net.minecraft.world.level.storage.loot.LootTable;
 import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import net.neoforged.fml.ModList;
-import net.neoforged.neoforge.common.ItemAbilities;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.EventHooks;
 import net.neoforged.neoforge.event.entity.player.PlayerContainerEvent;
+import net.neoforged.neoforge.network.PacketDistributor;
 import org.jetbrains.annotations.NotNull;
 import tallestegg.guardvillagers.GuardEntityType;
 import tallestegg.guardvillagers.GuardVillagers;
-import tallestegg.guardvillagers.ModCompat;
 import tallestegg.guardvillagers.client.GuardSounds;
-import tallestegg.guardvillagers.common.entities.ai.goals.ArmorerRepairGuardArmorGoal;
 import tallestegg.guardvillagers.configuration.GuardConfig;
 import tallestegg.guardvillagers.loot_tables.GuardLootTables;
 import tallestegg.guardvillagers.networking.GuardOpenInventoryPacket;
@@ -90,9 +90,8 @@ import javax.annotation.Nullable;
 import java.util.*;
 import java.util.function.Predicate;
 
-public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAttackMob, NeutralMob, ContainerListener, ReputationEventHandler {
-    protected static final EntityDataAccessor<Optional<UUID>> OWNER_UNIQUE_ID = SynchedEntityData.defineId(Guard.class, EntityDataSerializers.OPTIONAL_UUID);
-    private static final AttributeModifier USE_ITEM_SPEED_PENALTY = new AttributeModifier(ResourceLocation.fromNamespaceAndPath(GuardVillagers.MODID, "item_slow_down"), -0.25D, AttributeModifier.Operation.ADD_VALUE);
+public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAttackMob, ContainerListener, ReputationEventHandler, NeutralMob {
+    private static final AttributeModifier USE_ITEM_SPEED_PENALTY = new AttributeModifier(Identifier.fromNamespaceAndPath(GuardVillagers.MODID, "item_slow_down"), -0.25D, AttributeModifier.Operation.ADD_VALUE);
     private static final EntityDataAccessor<Optional<BlockPos>> GUARD_POS = SynchedEntityData.defineId(Guard.class, EntityDataSerializers.OPTIONAL_BLOCK_POS);
     private static final EntityDataAccessor<Boolean> PATROLLING = SynchedEntityData.defineId(Guard.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<String> GUARD_VARIANT = SynchedEntityData.defineId(Guard.class, EntityDataSerializers.STRING);
@@ -100,19 +99,7 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
     private static final EntityDataAccessor<Boolean> DATA_CHARGING_STATE = SynchedEntityData.defineId(Guard.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Boolean> KICKING = SynchedEntityData.defineId(Guard.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Boolean> FOLLOWING = SynchedEntityData.defineId(Guard.class, EntityDataSerializers.BOOLEAN);
-    private static final Map<Pose, EntityDimensions> SIZE_BY_POSE = ImmutableMap.<Pose, EntityDimensions>builder()
-            .put(Pose.SLEEPING, SLEEPING_DIMENSIONS)
-            .put(Pose.FALL_FLYING, EntityDimensions.scalable(0.6F, 0.6F).withEyeHeight(0.4F))
-            .put(Pose.SWIMMING, EntityDimensions.scalable(0.6F, 0.6F).withEyeHeight(0.4F))
-            .put(Pose.SPIN_ATTACK, EntityDimensions.scalable(0.6F, 0.6F).withEyeHeight(0.4F))
-            .put(
-                    Pose.CROUCHING,
-                    EntityDimensions.scalable(0.6F, 1.5F)
-                            .withEyeHeight(1.27F)
-                            .withAttachments(EntityAttachments.builder().attach(EntityAttachment.VEHICLE, new Vec3(0.0, 0.6, 0.0)
-                            ))).put(Pose.DYING, EntityDimensions.fixed(0.2F, 0.2F).withEyeHeight(1.62F))
-            .build();
-    private static final UniformInt angerTime = TimeUtil.rangeOfSeconds(20, 39);
+    private static final Map<Pose, EntityDimensions> SIZE_BY_POSE = ImmutableMap.<Pose, EntityDimensions>builder().put(Pose.SLEEPING, SLEEPING_DIMENSIONS).put(Pose.FALL_FLYING, EntityDimensions.scalable(0.6F, 0.6F).withEyeHeight(0.4F)).put(Pose.SWIMMING, EntityDimensions.scalable(0.6F, 0.6F).withEyeHeight(0.4F)).put(Pose.SPIN_ATTACK, EntityDimensions.scalable(0.6F, 0.6F).withEyeHeight(0.4F)).put(Pose.CROUCHING, EntityDimensions.scalable(0.6F, 1.5F).withEyeHeight(1.27F).withAttachments(EntityAttachments.builder().attach(EntityAttachment.VEHICLE, new Vec3(0.0, 0.6, 0.0)))).put(Pose.DYING, EntityDimensions.fixed(0.2F, 0.2F).withEyeHeight(1.62F)).build();
     private final GossipContainer gossips = new GossipContainer();
     public long lastGossipTime;
     public long lastGossipDecayTime;
@@ -122,39 +109,40 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
     public int kickCoolDown;
     public boolean interacting;
     protected boolean spawnWithArmor;
-    private int remainingPersistentAngerTime;
-    private UUID persistentAngerTarget;
+    @Nullable
+    private UUID ownerId;
+    @Nullable
+    private EntityReference<LivingEntity> persistentAngerTarget;
+    private static final EntityDataAccessor<Long> DATA_ANGER_END_TIME = SynchedEntityData.defineId(Guard.class, EntityDataSerializers.LONG);
+    private static final UniformInt PERSISTENT_ANGER_TIME = TimeUtil.rangeOfSeconds(20, 39);
+    private static final AttributeModifier HORSE_SPEED_COMPENSATOR = new AttributeModifier(Identifier.fromNamespaceAndPath(GuardVillagers.MODID, "horse_speed_compensator"), 0.27, AttributeModifier.Operation.ADD_VALUE);
 
     public Guard(EntityType<? extends Guard> type, Level world) {
         super(type, world);
         this.guardInventory.addListener(this);
         this.setPersistenceRequired();
-        if (GuardConfig.COMMON.GuardsOpenDoors.get())
-            ((GroundPathNavigation) this.getNavigation()).setCanOpenDoors(true);
+        if (GuardConfig.COMMON.GuardsOpenDoors.get()) this.getNavigation().setCanOpenDoors(true);
+        this.setPathfindingMalus(PathType.POWDER_SNOW, -1.0F);
+        this.setPathfindingMalus(PathType.DANGER_POWDER_SNOW, -1.0F);
+        this.setPathfindingMalus(PathType.DAMAGE_OTHER, -1.0F);
     }
 
-    public static int slotToInventoryIndex(EquipmentSlot slot) {
-        return switch (slot) {
-            case CHEST -> 1;
-            case FEET -> 3;
-            case HEAD -> 0;
-            case LEGS -> 2;
-            default -> 0;
-        };
+    @Override
+    protected PathNavigation createNavigation(Level level) {
+        return new GuardGroundPathNavigation(this, level);
     }
 
     public static String getVariantFromBiome(LevelAccessor world, BlockPos pos) {
-        VillagerType type = VillagerType.byBiome(world.getBiome(pos));
-        return GuardVillagers.removeModIdFromVillagerType(type.toString());
+        ResourceKey<VillagerType> type = VillagerType.byBiome(world.getBiome(pos));
+        return GuardVillagers.removeModIdFromVillagerType(type.identifier().toString());
     }
 
     public static AttributeSupplier.Builder createAttributes() {
         return Mob.createMobAttributes().add(Attributes.MAX_HEALTH, GuardConfig.STARTUP.healthModifier.get()).add(Attributes.MOVEMENT_SPEED, GuardConfig.STARTUP.speedModifier.get()).add(Attributes.ATTACK_DAMAGE, 1.0D).add(Attributes.FOLLOW_RANGE, GuardConfig.STARTUP.followRangeModifier.get());
     }
 
-    @SuppressWarnings({"deprecation", "OverrideOnly"})
     @Override
-    public SpawnGroupData finalizeSpawn(@NotNull ServerLevelAccessor worldIn, @NotNull DifficultyInstance difficultyIn, @NotNull MobSpawnType reason, @Nullable SpawnGroupData spawnDataIn) {
+    public SpawnGroupData finalizeSpawn(@NotNull ServerLevelAccessor worldIn, @NotNull DifficultyInstance difficultyIn, @NotNull EntitySpawnReason reason, @Nullable SpawnGroupData spawnDataIn) {
         this.setPersistenceRequired();
         String type = getVariantFromBiome(level(), this.blockPosition());
         this.setVariant(type);
@@ -202,128 +190,98 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
             ItemStack itemstack = this.guardInventory.getItem(i);
             RandomSource randomsource = level().getRandom();
             if (!itemstack.isEmpty() && !EnchantmentHelper.has(itemstack, EnchantmentEffectComponents.PREVENT_EQUIPMENT_DROP) && randomsource.nextFloat() < GuardConfig.COMMON.chanceToDropEquipment.get().floatValue())
-                this.spawnAtLocation(itemstack);
+                if (this.level() instanceof ServerLevel serverLevel) {
+                    this.spawnAtLocation(serverLevel, itemstack);
+                }
         }
     }
 
     @Override
-    public void readAdditionalSaveData(@NotNull CompoundTag compound) {
-        super.readAdditionalSaveData(compound);
-        if (compound.contains("Type", 99)) { // To accommodate guard variants in the previous updates
-            int variantint = compound.getInt("Type");
-            if (variantint == 1)
-                compound.putString("Variant", "desert");
-            else if (variantint == 2)
-                compound.putString("Variant", "savanna");
-            else if (variantint == 3)
-                compound.putString("Variant", "swamp");
-            else if (variantint == 4)
-                compound.putString("Variant", "jungle");
-            else if (variantint == 5)
-                compound.putString("Variant", "taiga");
-            else if (variantint == 6)
-                compound.putString("Variant", "snow");
-            else if (variantint == 0)
-                compound.putString("Variant", "plains");
-        }
-        UUID uuid = compound.hasUUID("Owner") ? compound.getUUID("Owner") : null;
-        if (uuid != null) {
+    public void readAdditionalSaveData(@NotNull ValueInput input) {
+        super.readAdditionalSaveData(input);
+        String ownerStr = input.getStringOr("Owner", "");
+        if (!ownerStr.isEmpty()) {
             try {
-                this.setOwnerId(uuid);
-            } catch (Throwable throwable) {
+                this.setOwnerId(UUID.fromString(ownerStr));
+            } catch (Throwable t) {
                 this.setOwnerId(null);
             }
         }
-        this.kickTicks = compound.getInt("KickTicks");
-        this.setFollowing(compound.getBoolean("Following"));
-        this.interacting = compound.getBoolean("Interacting");
-        this.setPatrolling(compound.getBoolean("Patrolling"));
-        this.shieldCoolDown = compound.getInt("KickCooldown");
-        this.kickCoolDown = compound.getInt("ShieldCooldown");
-        this.lastGossipDecayTime = compound.getLong("LastGossipDecay");
-        this.lastGossipTime = compound.getLong("LastGossipTime");
-        this.spawnWithArmor = compound.getBoolean("SpawnWithArmor");
-        if (compound.contains("Variant")) {
-            this.setVariant(GuardVillagers.removeModIdFromVillagerType(compound.getString("Variant")));
+        this.kickTicks = input.getIntOr("KickTicks", 0);
+        this.setFollowing(input.getBooleanOr("Following", false));
+        this.interacting = input.getBooleanOr("Interacting", false);
+        this.setPatrolling(input.getBooleanOr("Patrolling", false));
+        this.shieldCoolDown = input.getIntOr("ShieldCooldown", 0);
+        this.kickCoolDown = input.getIntOr("KickCooldown", 0);
+        this.lastGossipDecayTime = input.getLongOr("LastGossipDecay", 0L);
+        this.lastGossipTime = input.getLongOr("LastGossipTime", 0L);
+        this.spawnWithArmor = input.getBooleanOr("SpawnWithArmor", false);
+        input.getString("Variant").ifPresent(v -> this.setVariant(v));
+        var optX = input.getInt("PatrolPosX");
+        var optY = input.getInt("PatrolPosY");
+        var optZ = input.getInt("PatrolPosZ");
+        if (optX.isPresent() && optY.isPresent() && optZ.isPresent()) {
+            this.entityData.set(GUARD_POS, Optional.of(new BlockPos(optX.get(), optY.get(), optZ.get())));
         }
-        if (compound.contains("PatrolPosX")) {
-            int x = compound.getInt("PatrolPosX");
-            int y = compound.getInt("PatrolPosY");
-            int z = compound.getInt("PatrolPosZ");
-            this.entityData.set(GUARD_POS, Optional.of(new BlockPos(x, y, z)));
+        for (ItemStackWithSlot itemstackwithslot : input.listOrEmpty("Inventory", ItemStackWithSlot.CODEC)) {
+            if (itemstackwithslot.isValidInContainer(this.guardInventory.getContainerSize())) {
+                this.guardInventory.setItem(itemstackwithslot.slot(), itemstackwithslot.stack());
+            }
         }
-        ListTag listtag = compound.getList("Gossips", 10);
-        this.gossips.update(new Dynamic<>(NbtOps.INSTANCE, listtag));
-        ListTag listnbt = compound.getList("Inventory", 9);
-        for (int i = 0; i < listnbt.size(); ++i) {
-            CompoundTag compoundnbt = listnbt.getCompound(i);
-            int j = compoundnbt.getByte("Slot") & 255;
-            ItemStack stack = ItemStack.parseOptional(this.registryAccess(), compoundnbt);
-            if (!stack.isEmpty())
-                this.guardInventory.setItem(j, stack);
-            else
-                listtag.add(new CompoundTag());
-        }
-        if (compound.contains("ArmorItems", 9)) {
-            ListTag armorItems = compound.getList("ArmorItems", 10);
-            for (int i = 0; i < this.armorItems.size(); ++i) {
-                ItemStack stack = ItemStack.parseOptional(this.registryAccess(), armorItems.getCompound(i));
-                if (!stack.isEmpty()) {
-                    int index = Guard.slotToInventoryIndex(this.getEquipmentSlotForItem(ItemStack.parse(this.registryAccess(), armorItems.getCompound(i)).orElse(ItemStack.EMPTY)));
-                    this.guardInventory.setItem(index, stack);
-                } else {
-                    listtag.add(new CompoundTag());
+        if (input.keySet().contains("equipment")) {
+            for (EquipmentSlot slot : EquipmentSlot.values()) {
+                if (slot.getType() == EquipmentSlot.Type.HUMANOID_ARMOR || slot.getType() == EquipmentSlot.Type.HAND) {
+                    ItemStack stackFromslot = input.read("equipment", EntityEquipment.CODEC).get().get(slot);
+                    this.guardInventory.setItem(Guard.slotToInventoryIndex(slot), stackFromslot);
                 }
             }
-            if (compound.contains("HandItems", 9)) {
-                ListTag handItems = compound.getList("HandItems", 10);
-                for (int i = 0; i < this.handItems.size(); ++i) {
-                    int handSlot = i == 0 ? 5 : 4;
-                    if (!ItemStack.parseOptional(this.registryAccess(), handItems.getCompound(i)).isEmpty())
-                        this.guardInventory.setItem(handSlot, ItemStack.parseOptional(this.registryAccess(), handItems.getCompound(i)));
-                    else
-                        listtag.add(new CompoundTag());
-                }
-                if (!level().isClientSide) this.readPersistentAngerSaveData(level(), compound);
+        }
+        this.readPersistentAngerSaveData(this.level(), input);
+    }
+
+    @Override
+    protected void addAdditionalSaveData(ValueOutput output) {
+        super.addAdditionalSaveData(output);
+        this.addPersistentAngerSaveData(output);
+        output.putString("Variant", this.getVariant());
+        output.putInt("KickTicks", this.kickTicks);
+        output.putInt("ShieldCooldown", this.shieldCoolDown);
+        output.putInt("KickCooldown", this.kickCoolDown);
+        output.putBoolean("Following", this.isFollowing());
+        output.putBoolean("Interacting", this.interacting);
+        output.putBoolean("Patrolling", this.isPatrolling());
+        output.putBoolean("SpawnWithArmor", this.spawnWithArmor);
+        output.putLong("LastGossipTime", this.lastGossipTime);
+        output.putLong("LastGossipDecay", this.lastGossipDecayTime);
+        java.util.UUID owner = this.getOwnerId();
+        if (owner != null) {
+            output.putString("Owner", owner.toString());
+        }
+        var patrol = this.getPatrolPos();
+        if (patrol != null) {
+            output.putInt("PatrolPosX", patrol.getX());
+            output.putInt("PatrolPosY", patrol.getY());
+            output.putInt("PatrolPosZ", patrol.getZ());
+        }
+        ValueOutput.TypedOutputList<ItemStackWithSlot> typedoutputlist = output.list("Inventory", ItemStackWithSlot.CODEC);
+        for (int i = 0; i < this.guardInventory.getContainerSize(); i++) {
+            ItemStack itemstack = this.guardInventory.getItem(i);
+            if (!itemstack.isEmpty()) {
+                typedoutputlist.add(new ItemStackWithSlot(i, itemstack));
             }
         }
     }
 
-    @Override
-    public void addAdditionalSaveData(@NotNull CompoundTag compound) {
-        super.addAdditionalSaveData(compound);
-        compound.putString("Variant", this.getVariant());
-        compound.putInt("KickTicks", this.kickTicks);
-        compound.putInt("ShieldCooldown", this.shieldCoolDown);
-        compound.putInt("KickCooldown", this.kickCoolDown);
-        compound.putBoolean("Following", this.isFollowing());
-        compound.putBoolean("Interacting", this.interacting);
-        compound.putBoolean("Patrolling", this.isPatrolling());
-        compound.putBoolean("SpawnWithArmor", this.spawnWithArmor);
-        compound.putLong("LastGossipTime", this.lastGossipTime);
-        compound.putLong("LastGossipDecay", this.lastGossipDecayTime);
-        if (this.getOwnerId() != null) {
-            compound.putUUID("Owner", this.getOwnerId());
-        }
-        ListTag listnbt = new ListTag();
-        for (int i = 0; i < this.guardInventory.getContainerSize(); ++i) {
-            ItemStack itemstack = this.guardInventory.getItem(i);
-            if (!itemstack.isEmpty()) {
-                CompoundTag compoundnbt = new CompoundTag();
-                compoundnbt.putByte("Slot", (byte) i);
-                listnbt.add(itemstack.save(this.registryAccess(), compoundnbt));
-            } else {
-                listnbt.add(new CompoundTag());
-            }
-        }
-        compound.put("Inventory", listnbt);
-        if (this.getPatrolPos() != null) {
-            compound.putInt("PatrolPosX", this.getPatrolPos().getX());
-            compound.putInt("PatrolPosY", this.getPatrolPos().getY());
-            compound.putInt("PatrolPosZ", this.getPatrolPos().getZ());
-        }
-        compound.put("Gossips", this.gossips.store(NbtOps.INSTANCE));
-        this.addPersistentAngerSaveData(compound);
+    public static int slotToInventoryIndex(EquipmentSlot slot) {
+        return switch (slot) {
+            case CHEST -> 1;
+            case FEET -> 3;
+            case LEGS -> 2;
+            case HEAD -> 0;
+            case MAINHAND -> 5;
+            case OFFHAND -> 4;
+            default -> 0;
+        };
     }
 
     private void maybeDecayGossip() {
@@ -338,24 +296,33 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
 
     @Override
     protected void completeUsingItem() {
-        if (this.isUsingItem()) {
-            InteractionHand interactionhand = this.getUsedItemHand();
-            if (!this.useItem.equals(this.getItemInHand(interactionhand))) {
-                this.releaseUsingItem();
-            } else {
-                if (!this.useItem.isEmpty() && this.isUsingItem()) {
-                    this.triggerItemUseEffects(this.useItem, 16);
-                    ItemStack copy = this.useItem.copy();
-                    ItemStack itemstack = EventHooks.onItemUseFinish(this, copy, getUseItemRemainingTicks(), this.useItem.finishUsingItem(this.level(), this));
-                    if (itemstack != this.useItem) {
-                        this.setItemInHand(interactionhand, itemstack);
-                    }
-                    if (!(this.useItem.getUseAnimation() == UseAnim.EAT)) this.useItem.shrink(1);
-                    this.stopUsingItem();
-                }
+        if (!this.isUsingItem()) {
+            return;
+        }
+        InteractionHand hand = this.getUsedItemHand();
+        if (!this.useItem.equals(this.getItemInHand(hand))) {
+            this.releaseUsingItem();
+            return;
+        }
 
+        if (this.useItem.isEmpty()) {
+            return;
+        }
+        ItemStack consumedStack = this.useItem.copy();
+        if (Guard.isConsumable(consumedStack)) {
+            FoodProperties food = consumedStack.get(DataComponents.FOOD);
+            if (food != null) {
+                this.heal((float) food.nutrition());
             }
         }
+        ItemStack result = EventHooks.onItemUseFinish(this, consumedStack, this.getUseItemRemainingTicks(), this.useItem.finishUsingItem(this.level(), this));
+        if (result != this.useItem) {
+            this.setItemInHand(hand, result);
+        }
+        if (this.useItem.getUseAnimation() != ItemUseAnimation.EAT) {
+            this.useItem.shrink(1);
+        }
+        this.stopUsingItem();
     }
 
     @Override
@@ -396,24 +363,24 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
 
     @Nullable
     public UUID getOwnerId() {
-        return this.entityData.get(OWNER_UNIQUE_ID).orElse(null);
+        return this.ownerId;
     }
 
-    public void setOwnerId(@Nullable UUID p_184754_1_) {
-        this.entityData.set(OWNER_UNIQUE_ID, Optional.ofNullable(p_184754_1_));
+    public void setOwnerId(@Nullable UUID id) {
+        this.ownerId = id;
     }
 
     @Override
-    public boolean doHurtTarget(@NotNull Entity entityIn) {
+    public boolean doHurtTarget(@NotNull ServerLevel level, @NotNull Entity target) {
         if (this.isKicking()) {
-            ((LivingEntity) entityIn).knockback(1.0F, Mth.sin(this.getYRot() * ((float) Math.PI / 180F)), (-Mth.cos(this.getYRot() * ((float) Math.PI / 180F))));
+            ((LivingEntity) target).knockback(1.0F, Mth.sin(this.getYRot() * ((float) Math.PI / 180F)), (-Mth.cos(this.getYRot() * ((float) Math.PI / 180F))));
             this.kickTicks = 10;
             level().broadcastEntityEvent(this, (byte) 4);
-            this.lookAt(entityIn, 90.0F, 90.0F);
+            this.lookAt(target, 90.0F, 90.0F);
         }
         ItemStack hand = this.getMainHandItem();
         this.damageGuardItem(1, EquipmentSlot.MAINHAND, hand);
-        return super.doHurtTarget(entityIn);
+        return super.doHurtTarget((ServerLevel) level(), getTarget());
     }
 
     @Override
@@ -432,26 +399,45 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
 
     @Override
     public void die(@NotNull DamageSource source) {
-        if ((level().getDifficulty() == Difficulty.NORMAL || level().getDifficulty() == Difficulty.HARD) && source.getEntity() instanceof Zombie && EventHooks.canLivingConvert((LivingEntity) source.getEntity(), EntityType.ZOMBIE_VILLAGER, (timer) -> {
+        if (GuardConfig.COMMON.convertGuardOnDeath.get() && (level().getDifficulty() == Difficulty.NORMAL || level().getDifficulty() == Difficulty.HARD) && source.getEntity() instanceof Zombie && EventHooks.canLivingConvert((LivingEntity) source.getEntity(), EntityType.ZOMBIE_VILLAGER, (timer) -> {
         })) {
-            ZombieVillager zombieguard = this.convertTo(EntityType.ZOMBIE_VILLAGER, true);
-            if (level().getDifficulty() != Difficulty.HARD && this.random.nextBoolean() || zombieguard == null) {
+            if (this.level() instanceof ServerLevel serverLevel) {
+                if (level().getDifficulty() != Difficulty.HARD && this.random.nextBoolean()) {
+                    super.die(source);
+                    return;
+                }
+
+                ZombieVillager zombieguard = EntityType.ZOMBIE_VILLAGER.create(serverLevel, EntitySpawnReason.CONVERSION);
+                if (zombieguard == null) {
+                    super.die(source);
+                    return;
+                }
+                zombieguard.copyPosition(this);
+                zombieguard.finalizeSpawn(serverLevel, serverLevel.getCurrentDifficultyAt(zombieguard.blockPosition()), EntitySpawnReason.CONVERSION, null);
+                zombieguard.setNoAi(this.isNoAi());
+                zombieguard.setCustomName(this.getCustomName());
+                zombieguard.setCustomNameVisible(this.isCustomNameVisible());
+                zombieguard.setPersistenceRequired();
+
+                for (EquipmentSlot slot : EquipmentSlot.values()) {
+                    ItemStack stack = this.getItemBySlot(slot);
+                    if (!stack.isEmpty()) {
+                        zombieguard.setItemSlot(slot, stack.copy());
+                    }
+                }
+
+                if (!this.isSilent()) {
+                    level().levelEvent(null, 1026, this.blockPosition(), 0);
+                }
+
+                serverLevel.addFreshEntityWithPassengers(zombieguard);
+
+                this.discard();
                 return;
             }
-            if (!this.isSilent()) level().levelEvent(null, 1026, this.blockPosition(), 0);
-            this.discard();
         }
-        super.die(source);
-    }
 
-    @Override
-    public @NotNull ItemStack eat(@NotNull Level world, ItemStack stack, @NotNull FoodProperties foodProperties) {
-        if (stack.getUseAnimation() == UseAnim.EAT) {
-            this.heal((foodProperties.nutrition()));
-        }
-        world.playSound(null, this.getX(), this.getY(), this.getZ(), SoundEvents.PLAYER_BURP, SoundSource.PLAYERS, 0.5F, world.random.nextFloat() * 0.1F + 0.9F);
-        super.eat(world, stack, foodProperties);
-        return stack;
+        super.die(source);
     }
 
     @Override
@@ -466,7 +452,6 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
             getItemsFromLootTable(this);
             this.spawnWithArmor = false;
         }
-        if (!level().isClientSide) this.updatePersistentAnger((ServerLevel) level(), true);
         this.updateSwingTime();
         super.aiStep();
     }
@@ -483,37 +468,39 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
     }
 
     @Override
-    protected void blockUsingShield(@NotNull LivingEntity entityIn) {
-        super.blockUsingShield(entityIn);
-        this.playSound(SoundEvents.SHIELD_BLOCK, 1.0F, 1.0F);
-        if (entityIn.getMainHandItem().canDisableShield(this.useItem, this, entityIn)) this.disableShield();
+    protected void blockUsingItem(ServerLevel level, LivingEntity entityIn) {
+        super.blockUsingItem(level, entityIn);
+        this.playSound(SoundEvents.SHIELD_BLOCK.value(), 1.0F, 1.0F);
+
+        ItemStack blocking = this.getItemBlockingWith();
+        if (blocking.isEmpty()) return;
+        BlocksAttacks blocksAttacks = blocking.get(DataComponents.BLOCKS_ATTACKS);
+        if (blocksAttacks == null) return;
+        float disableSeconds = entityIn.getSecondsToDisableBlocking();
+        if (disableSeconds <= 0.0F) return;
+        float scale = blocksAttacks.disableCooldownScale();
+        if (scale <= 0.0F) return;
+        int disableTicks = Mth.ceil(disableSeconds * 20.0F * scale);
+        this.disableShieldFor(disableTicks);
     }
 
-    @Override
-    protected void hurtCurrentlyUsedShield(float damage) {
-        if (this.useItem.canPerformAction(ItemAbilities.SHIELD_BLOCK)) {
-            if (damage >= 3.0F) {
-                int i = 1 + Mth.floor(damage);
-                InteractionHand hand = this.getUsedItemHand();
-                this.damageGuardItem(i, LivingEntity.getSlotForHand(hand), useItem);
-                if (this.useItem.isEmpty()) {
-                    if (hand == InteractionHand.MAIN_HAND) {
-                        this.setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
-                    } else {
-                        this.setItemSlot(EquipmentSlot.OFFHAND, ItemStack.EMPTY);
-                    }
-                    this.useItem = ItemStack.EMPTY;
-                    this.playSound(SoundEvents.SHIELD_BREAK, 0.8F, 0.8F + level().random.nextFloat() * 0.4F);
-                }
-            }
-        }
+    public void disableShieldFor(int ticks) {
+        this.shieldCoolDown = ticks;
+        this.stopUsingItem();
+        this.level().broadcastEntityEvent(this, (byte) 30);
+    }
+
+    public static boolean isActivelyBlocking(LivingEntity e) {
+        if (!e.isBlocking()) return false;
+        ItemStack blocking = e.getItemBlockingWith();
+        return !blocking.isEmpty() && blocking.has(DataComponents.BLOCKS_ATTACKS);
     }
 
     @Override
     public void startUsingItem(@NotNull InteractionHand hand) {
         super.startUsingItem(hand);
         ItemStack itemstack = this.getItemInHand(hand);
-        if (itemstack.canPerformAction(ItemAbilities.SHIELD_BLOCK)) {
+        if (!itemstack.isEmpty() && itemstack.has(DataComponents.BLOCKS_ATTACKS)) {
             AttributeInstance modifiableattributeinstance = this.getAttribute(Attributes.MOVEMENT_SPEED);
             assert modifiableattributeinstance != null;
             modifiableattributeinstance.removeModifier(USE_ITEM_SPEED_PENALTY);
@@ -522,29 +509,39 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
     }
 
     @Override
+    public boolean startRiding(Entity vehicle, boolean force, boolean sendGameEvent) {
+        if (vehicle instanceof LivingEntity living)
+            living.getAttribute(Attributes.MOVEMENT_SPEED).addOrUpdateTransientModifier(HORSE_SPEED_COMPENSATOR);
+        return super.startRiding(vehicle, force, sendGameEvent);
+    }
+
+    @Override
+    public void stopRiding() {
+        Entity entity = this.getVehicle();
+        if (entity instanceof LivingEntity living)
+            living.getAttribute(Attributes.MOVEMENT_SPEED).removeModifier(HORSE_SPEED_COMPENSATOR);
+        super.stopRiding();
+    }
+
+
+    @Override
     public void stopUsingItem() {
         super.stopUsingItem();
         if (this.getAttribute(Attributes.MOVEMENT_SPEED).hasModifier(USE_ITEM_SPEED_PENALTY.id()))
             this.getAttribute(Attributes.MOVEMENT_SPEED).removeModifier(USE_ITEM_SPEED_PENALTY);
     }
 
-    public void disableShield() {
-        this.shieldCoolDown = 100;
-        this.stopUsingItem();
-        this.level().broadcastEntityEvent(this, (byte) 30);
-    }
-
     @Override
     protected void defineSynchedData(SynchedEntityData.Builder data) {
         super.defineSynchedData(data);
-        data.define(GUARD_VARIANT, VillagerType.PLAINS.toString());
+        data.define(GUARD_VARIANT, "plains");
         data.define(DATA_CHARGING_STATE, false);
         data.define(KICKING, false);
-        data.define(OWNER_UNIQUE_ID, Optional.empty());
         data.define(FOLLOWING, false);
         data.define(GUARD_POS, Optional.empty());
         data.define(PATROLLING, false);
         data.define(RUNNING_TO_EAT, false);
+        data.define(DATA_ANGER_END_TIME, -1L);
     }
 
     public void setChargingCrossbow(boolean charging) {
@@ -561,23 +558,21 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
 
     @Override
     protected void populateDefaultEquipmentSlots(RandomSource source, DifficultyInstance instance) {
-        this.handDropChances[EquipmentSlot.MAINHAND.getIndex()] = 100.0F;
-        this.handDropChances[EquipmentSlot.OFFHAND.getIndex()] = 100.0F;
         this.spawnWithArmor = true;
     }
 
     @Override
     protected void registerGoals() {
-        this.goalSelector.addGoal(0, new FloatGoal(this));
         this.goalSelector.addGoal(0, new KickGoal(this));
         this.goalSelector.addGoal(0, new GuardEatFoodGoal(this));
         this.goalSelector.addGoal(0, new RaiseShieldGoal(this));
         this.goalSelector.addGoal(1, new GuardRunToEatGoal(this));
-        this.goalSelector.addGoal(3, new RangedCrossbowAttackPassiveGoal<>(this, 1.0D, 8.0F));
+        this.goalSelector.addGoal(3, new RangedCrossbowAttackPassiveGoal<>(this, 1.0D, GuardConfig.COMMON.guardCrossbowAttackRadius.get().floatValue()));
+        this.goalSelector.addGoal(3, new PassiveMobSpearUseGoal<>(this, 0.7D, 0.8D, 10.0F, 2.0F));
         this.goalSelector.addGoal(3, new GuardBowAttack(this, 0.5D, 20, 15.0F));
-        if (ModList.get().isLoaded("musketmod"))
-            this.goalSelector.addGoal(3, new ModCompat.UseMusketGoal(this, 20, 15.0F));
-        this.goalSelector.addGoal(3, new GuardMeleeGoal(this, 0.8D, true));
+        //if (ModList.get().isLoaded("musketmod"))
+        // this.goalSelector.addGoal(3, new ModCompat.UseMusketGoal(this, 20, 15.0F));
+        this.goalSelector.addGoal(3, new GuardMeleeGoal(this, 1.0D, true));
         this.goalSelector.addGoal(4, new FollowHeroGoal(this, 0.8F, 10.0F, 4.0F));
         if (GuardConfig.COMMON.GuardsRunFromPolarBears.get())
             this.goalSelector.addGoal(4, new AvoidEntityGoal<>(this, PolarBear.class, 12.0F, 1.0D, 1.2D));
@@ -586,9 +581,6 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
             this.goalSelector.addGoal(4, new GuardInteractDoorGoal(this, true));
         if (GuardConfig.COMMON.GuardFormation.get())
             this.goalSelector.addGoal(6, new FollowShieldGuards(this)); // phalanx
-        if (GuardConfig.COMMON.ClericHealing.get()) this.goalSelector.addGoal(6, new RunToClericGoal(this));
-        if (GuardConfig.COMMON.armorersRepairGuardArmor.get())
-            this.goalSelector.addGoal(6, new ArmorerRepairGuardArmorGoal(this));
         this.goalSelector.addGoal(3, new WalkBackToCheckPointGoal(this, 0.5D));
         this.goalSelector.addGoal(5, new GolemRandomStrollInVillageGoal(this, 0.5D));
         if (GuardConfig.COMMON.guardPatrolVillageAi.get())
@@ -597,21 +589,31 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
         this.goalSelector.addGoal(8, new LookAtPlayerGoal(this, AbstractVillager.class, 8.0F));
         this.goalSelector.addGoal(8, new LookAtPlayerGoal(this, Player.class, 8.0F));
         this.goalSelector.addGoal(8, new GuardLookAtAndStopMovingWhenBeingTheInteractionTarget(this));
+        if (GuardConfig.COMMON.guardSinkToFightUnderWater.get()) {
+            this.goalSelector.addGoal(10, new FloatGoal(this) {
+                @Override
+                public boolean canUse() {
+                    return super.canUse() && ((Guard.this.getTarget() != null && (Guard.this.getY() - Guard.this.getTarget().getY()) >= GuardConfig.COMMON.depthGuardHuntUnderwater.get()) || Guard.this.getMainHandItem().getItem() instanceof ProjectileWeaponItem || Guard.this.getTarget() == null || Guard.this.getAirSupply() <= 0); // If I have a target in the water, stop floating, otherwise float
+                }
+            });
+        } else {
+            this.goalSelector.addGoal(10, new FloatGoal(this));
+        }
         this.targetSelector.addGoal(2, (new HurtByTargetGoal(this, Guard.class, IronGolem.class)).setAlertOthers());
         this.targetSelector.addGoal(3, new HeroHurtByTargetGoal(this));
         this.targetSelector.addGoal(3, new HeroHurtTargetGoal(this));
         this.targetSelector.addGoal(5, new DefendVillageGuardGoal(this));
         if (GuardConfig.COMMON.AttackAllMobs.get()) {
-            this.targetSelector.addGoal(3, new NearestAttackableTargetGoal<>(this, Mob.class, 5, true, true, (mob) -> mob instanceof Enemy && !GuardConfig.COMMON.MobBlackList.get().contains(mob.getEncodeId())));
+            this.targetSelector.addGoal(5, new NearestAttackableTargetGoal<>(this, Mob.class, 5, true, true, (mob, serverLevel) -> mob instanceof Enemy && !GuardConfig.COMMON.MobBlackList.get().contains(mob.getEncodeId())));
         } else {
-            this.targetSelector.addGoal(2, new NearestAttackableTargetGoal<>(this, Ravager.class, true)); // To make witches and ravagers have a priority than other mobs this has to be done
-            this.targetSelector.addGoal(2, new NearestAttackableTargetGoal<>(this, Witch.class, true));
-            this.targetSelector.addGoal(3, new NearestAttackableTargetGoal<>(this, Raider.class, true));
-            this.targetSelector.addGoal(4, new NearestAttackableTargetGoal<>(this, Zombie.class, true, (mob) -> !(mob instanceof ZombifiedPiglin)));
+            this.targetSelector.addGoal(3, new NearestAttackableTargetGoal<>(this, Ravager.class, true)); // To make witches and ravagers have a priority than other mobs this has to be done
+            this.targetSelector.addGoal(4, new NearestAttackableTargetGoal<>(this, Witch.class, true));
+            this.targetSelector.addGoal(5, new NearestAttackableTargetGoal<>(this, Raider.class, true));
+            this.targetSelector.addGoal(5, new NearestAttackableTargetGoal<>(this, Zombie.class, true, (target, serverLevel) -> !(target instanceof ZombifiedPiglin)));
         }
-        this.targetSelector.addGoal(3, new NearestAttackableTargetGoal<>(this, LivingEntity.class, 5, true, true, (mob) -> GuardConfig.COMMON.MobWhiteList.get().contains(mob.getEncodeId())));
-        this.targetSelector.addGoal(3, new NearestAttackableTargetGoal<>(this, Player.class, 10, true, false, this::isAngryAt));
-        this.targetSelector.addGoal(4, new ResetUniversalAngerTargetGoal<>(this, false));
+        this.targetSelector.addGoal(4, new NearestAttackableTargetGoal<>(this, Player.class, 10, true, false, this::isAngryAt));
+        this.targetSelector.addGoal(5, new NearestAttackableTargetGoal<>(this, LivingEntity.class, 5, true, true, (mob, serverLevel) -> GuardConfig.COMMON.MobWhiteList.get().contains(mob.getEncodeId())));
+        this.targetSelector.addGoal(8, new ResetUniversalAngerTargetGoal<>(this, true));
     }
 
     @Override
@@ -637,8 +639,7 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
             this.level().addFreshEntity(abstractarrowentity);
             this.damageGuardItem(1, EquipmentSlot.MAINHAND, hand);
         }
-        if (ModList.get().isLoaded("musketmod"))
-            ModCompat.shootGun(this);
+        // if (ModList.get().isLoaded("musketmod")) ModCompat.shootGun(this);
     }
 
     @Override
@@ -646,9 +647,7 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
         InteractionHand interactionhand = ProjectileUtil.getWeaponHoldingHand(p_32337_, item -> item instanceof CrossbowItem);
         ItemStack itemstack = p_32337_.getItemInHand(interactionhand);
         if (itemstack.getItem() instanceof CrossbowItem crossbowitem) {
-            crossbowitem.performShooting(
-                    p_32337_.level(), p_32337_, interactionhand, itemstack, p_32338_, 0.0F, null
-            );
+            crossbowitem.performShooting(p_32337_.level(), p_32337_, interactionhand, itemstack, p_32338_, 0.0F, null);
         }
 
         this.onCrossbowAttackPerformed();
@@ -660,25 +659,25 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
         switch (slotIn) {
             case CHEST:
                 if (this.guardInventory.getItem(1).isEmpty())
-                    this.guardInventory.setItem(1, this.armorItems.get(slotIn.getIndex()));
+                    this.guardInventory.setItem(1, this.equipment.get(slotIn));
                 break;
             case FEET:
                 if (this.guardInventory.getItem(3).isEmpty())
-                    this.guardInventory.setItem(3, this.armorItems.get(slotIn.getIndex()));
+                    this.guardInventory.setItem(3, this.equipment.get(slotIn));
                 break;
             case HEAD:
                 if (this.guardInventory.getItem(0).isEmpty())
-                    this.guardInventory.setItem(0, this.armorItems.get(slotIn.getIndex()));
+                    this.guardInventory.setItem(0, this.equipment.get(slotIn));
                 break;
             case LEGS:
                 if (this.guardInventory.getItem(2).isEmpty())
-                    this.guardInventory.setItem(2, this.armorItems.get(slotIn.getIndex()));
+                    this.guardInventory.setItem(2, this.equipment.get(slotIn));
                 break;
             case MAINHAND:
-                this.guardInventory.setItem(5, this.handItems.get(slotIn.getIndex()));
+                this.guardInventory.setItem(5, this.equipment.get(slotIn));
                 break;
             case OFFHAND:
-                this.guardInventory.setItem(4, this.handItems.get(slotIn.getIndex()));
+                this.guardInventory.setItem(4, this.equipment.get(slotIn));
                 break;
         }
     }
@@ -714,7 +713,7 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
     @Override
     public void rideTick() {
         super.rideTick();
-        if (this.getVehicle() instanceof PathfinderMob creatureentity) {
+        if (this.getControlledVehicle() instanceof PathfinderMob creatureentity) {
             this.yBodyRot = creatureentity.yBodyRot;
         }
     }
@@ -725,27 +724,52 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
     }
 
     @Override
+    public long getPersistentAngerEndTime() {
+        return this.entityData.get(DATA_ANGER_END_TIME);
+    }
+
+    @Override
+    public void setPersistentAngerEndTime(long persistentAngerEndTime) {
+        this.entityData.set(DATA_ANGER_END_TIME, persistentAngerEndTime);
+    }
+
+    @Override
+    public @org.jspecify.annotations.Nullable EntityReference<LivingEntity> getPersistentAngerTarget() {
+        return persistentAngerTarget;
+    }
+
+    @Override
+    public void setPersistentAngerTarget(@org.jspecify.annotations.Nullable EntityReference<LivingEntity> persistentAngerTarget) {
+        this.persistentAngerTarget = persistentAngerTarget;
+    }
+
+    @Override
+    public void startPersistentAngerTimer() {
+        this.setTimeToRemainAngry(PERSISTENT_ANGER_TIME.sample(this.random));
+    }
+
+    @Override
     public void setTarget(LivingEntity entity) {
-        if (entity != null && ((this.getTeam() != null && entity.getTeam() != null && this.getTeam().isAlliedTo(entity.getTeam())) || GuardConfig.COMMON.MobBlackList.get().contains(EntityType.getKey(entity.getType()).toString()) || entity.hasEffect(MobEffects.HERO_OF_THE_VILLAGE) || this.isOwner(entity) || (entity instanceof TamableAnimal tamed && (tamed.getOwnerUUID() != null && tamed.getOwnerUUID().equals(this.getOwnerId())))))
+        if (entity != null && entity.isAlive() && ((this.getTeam() != null && entity.getTeam() != null && this.getTeam().isAlliedTo(entity.getTeam())) || GuardConfig.COMMON.MobBlackList.get().contains(EntityType.getKey(entity.getType()).toString()) || entity.hasEffect(MobEffects.HERO_OF_THE_VILLAGE) || this.isOwner(entity) || (entity instanceof TamableAnimal tamed && (tamed.getOwner() != null && tamed.getOwner().getUUID().equals(this.getOwnerId())))))
             return;
         super.setTarget(entity);
     }
 
+
     public void gossip(Villager villager, long gameTime) {
-        if ((gameTime < this.lastGossipTime || gameTime >= this.lastGossipTime + 1200L) && (gameTime < villager.lastGossipTime || gameTime >= villager.lastGossipTime + 1200L)) {
+        if (gameTime < this.lastGossipTime || gameTime >= this.lastGossipTime + 1200L) {
             this.gossips.transferFrom(villager.getGossips(), this.random, 10);
             this.lastGossipTime = gameTime;
-            villager.lastGossipTime = gameTime;
         }
     }
 
 
     @Override
-    protected void blockedByShield(LivingEntity entityIn) {
+    protected void blockedByItem(LivingEntity entityIn) {
         if (this.isKicking()) {
             this.setKicking(false);
         }
-        super.blockedByShield(this);
+        super.blockedByItem(this);
     }
 
     @Override
@@ -782,10 +806,10 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
     public void thunderHit(ServerLevel p_241841_1_, LightningBolt p_241841_2_) {
         if (p_241841_1_.getDifficulty() != Difficulty.PEACEFUL && EventHooks.canLivingConvert(this, EntityType.WITCH, (timer) -> {
         })) {
-            Witch witchentity = EntityType.WITCH.create(p_241841_1_);
+            Witch witchentity = EntityType.WITCH.create(p_241841_1_, EntitySpawnReason.EVENT);
             if (witchentity == null) return;
             witchentity.copyPosition(this);
-            witchentity.finalizeSpawn(p_241841_1_, p_241841_1_.getCurrentDifficultyAt(witchentity.blockPosition()), MobSpawnType.CONVERSION, null);
+            witchentity.finalizeSpawn(p_241841_1_, p_241841_1_.getCurrentDifficultyAt(witchentity.blockPosition()), EntitySpawnReason.CONVERSION, null);
             witchentity.setNoAi(this.isNoAi());
             witchentity.setCustomName(this.getCustomName());
             witchentity.setCustomNameVisible(this.isCustomNameVisible());
@@ -797,31 +821,6 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
         }
     }
 
-    @Override
-    public UUID getPersistentAngerTarget() {
-        return this.persistentAngerTarget;
-    }
-
-    @Override
-    public void setPersistentAngerTarget(UUID arg0) {
-        this.persistentAngerTarget = arg0;
-    }
-
-    @Override
-    public int getRemainingPersistentAngerTime() {
-        return this.remainingPersistentAngerTime;
-    }
-
-    @Override
-    public void setRemainingPersistentAngerTime(int arg0) {
-        this.remainingPersistentAngerTime = arg0;
-    }
-
-    @Override
-    public void startPersistentAngerTimer() {
-        this.setRemainingPersistentAngerTime(angerTime.sample(random));
-    }
-
     public void openGui(ServerPlayer player) {
         this.setOwnerId(player.getUUID());
         if (player.containerMenu != player.inventoryMenu) {
@@ -829,7 +828,9 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
         }
         this.interacting = true;
         player.nextContainerCounter();
-        player.connection.send(new GuardOpenInventoryPacket(player.containerCounter, this.guardInventory.getContainerSize(), this.getId()));
+
+        PacketDistributor.sendToPlayer(player, new GuardOpenInventoryPacket(player.containerCounter, this.guardInventory.getContainerSize(), this.getId()));
+
         player.containerMenu = new GuardContainer(player.containerCounter, player.getInventory(), this.guardInventory, this);
         player.initMenu(player.containerMenu);
         NeoForge.EVENT_BUS.post(new PlayerContainerEvent.Open(player, player.containerMenu));
@@ -848,13 +849,13 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
         this.entityData.set(PATROLLING, patrolling);
     }
 
-    @Override
+    //@Override
     public boolean canFireProjectileWeapon(ProjectileWeaponItem item) {
-        return item instanceof BowItem || item instanceof CrossbowItem || super.canFireProjectileWeapon(item);
+        return item instanceof BowItem || item instanceof CrossbowItem;
     }
 
     public static boolean isConsumable(ItemStack stack) {
-        return stack.getUseAnimation() == UseAnim.EAT || stack.getUseAnimation() == UseAnim.DRINK && !(stack.getItem() instanceof SplashPotionItem);
+        return stack.getUseAnimation() == ItemUseAnimation.EAT || stack.getUseAnimation() == ItemUseAnimation.DRINK && !(stack.getItem() instanceof SplashPotionItem);
     }
 
     public void tryToTeleportToOwner() {
@@ -886,7 +887,7 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
         if (!this.canTeleportTo(new BlockPos(x, y, z))) {
             return false;
         } else {
-            this.moveTo((double) x + 0.5, y, (double) z + 0.5, this.getYRot(), this.getXRot());
+            this.snapTo((double) x + 0.5, y, (double) z + 0.5, this.getYRot(), this.getXRot());
             this.navigation.stop();
             return true;
         }
@@ -914,7 +915,7 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
     }
 
     public static ResourceKey<LootTable> getLootTableFromData() {
-        ResourceLocation lootTable = ResourceLocation.fromNamespaceAndPath(GuardVillagers.MODID, "entities/guard_armor");
+        Identifier lootTable = Identifier.fromNamespaceAndPath(GuardVillagers.MODID, "entities/guard_armor");
         return ResourceKey.create(Registries.LOOT_TABLE, lootTable);
     }
 
@@ -1045,6 +1046,18 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
         private static final double DEFAULT_ATTACK_REACH = Math.sqrt(2.04F) - (double) 0.6F;
         public final Guard guard;
 
+        @Override
+        public void start() {
+            super.start();
+            this.guard.setAggressive(true);
+        }
+
+        @Override
+        public void stop() {
+            super.stop();
+            this.guard.setAggressive(false);
+        }
+
         public GuardMeleeGoal(Guard guard, double speedIn, boolean useLongMemory) {
             super(guard, speedIn, useLongMemory);
             this.guard = guard;
@@ -1052,7 +1065,7 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
 
         @Override
         public boolean canUse() {
-            return (!(mob.getMainHandItem().getItem() instanceof CrossbowItem) || !(mob.getMainHandItem().getItem() instanceof BowItem)) && this.guard.getTarget() != null && !this.guard.isEating() && super.canUse();
+            return !(mob.getMainHandItem().getItem() instanceof CrossbowItem) && !(mob.getMainHandItem().getItem() instanceof BowItem) && this.guard.getTarget() != null && !this.guard.isEating() && super.canUse();
         }
 
         @Override
@@ -1080,7 +1093,9 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
                 this.guard.stopUsingItem();
                 if (guard.shieldCoolDown == 0) this.guard.shieldCoolDown = 8;
                 this.guard.swing(InteractionHand.MAIN_HAND);
-                this.guard.doHurtTarget(enemy);
+                if (this.guard.level() instanceof ServerLevel serverLevel) {
+                    this.guard.doHurtTarget(serverLevel, enemy);
+                }
             }
         }
 
@@ -1124,6 +1139,11 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
         @Override
         public void tick() {
             super.tick();
+            LivingEntity attacker = guard.getTarget();
+            if (attacker != null && attacker.isAlive()) {
+                this.guard.getLookControl().setLookAt(attacker);
+                this.guard.lookAt(attacker, 30.0F, 30.0F);
+            }
             if (guard.isPatrolling()) {
                 guard.getNavigation().stop();
                 guard.getMoveControl().strafe(0.0F, 0.0F);
@@ -1135,7 +1155,7 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
 
         @Override
         public boolean canContinueToUse() {
-            return (this.canUse() || !guard.getNavigation().isDone()) && this.isBowInMainhand();
+            return (this.canUse() || !guard.getNavigation().isDone()) && this.isBowInMainhand() && guard.getTarget() != null && guard.getTarget().isAlive();
         }
 
     }
@@ -1162,8 +1182,7 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
         }
 
         private boolean areOtherMobsComingThroughDoor(Guard pEntity) {
-            List<? extends PathfinderMob> nearbyEntityList = pEntity.level().getEntitiesOfClass(PathfinderMob.class,
-                    pEntity.getBoundingBox().inflate(4.0D));
+            List<? extends PathfinderMob> nearbyEntityList = pEntity.level().getEntitiesOfClass(PathfinderMob.class, pEntity.getBoundingBox().inflate(4.0D));
             if (!nearbyEntityList.isEmpty()) {
                 for (PathfinderMob mob : nearbyEntityList) {
                     if (mob.blockPosition().closerToCenterThan(pEntity.position(), 2.0D))
@@ -1301,8 +1320,7 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
                 for (LivingEntity mob : list) {
                     if (mob != null) {
                         if (mob.getLastHurtMob() instanceof Guard || mob instanceof Mob && ((Mob) mob).getTarget() instanceof Guard) {
-                            if (walkTimer < 20)
-                                this.walkTimer += 5;
+                            if (walkTimer < 20) this.walkTimer += 5;
                         }
                     }
                 }
@@ -1338,8 +1356,7 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
     }
 
     public static class FollowShieldGuards extends Goal {
-        private static final TargetingConditions NEARBY_GUARDS = TargetingConditions.forNonCombat().range(8.0D)
-                .ignoreLineOfSight();
+        private static final TargetingConditions NEARBY_GUARDS = TargetingConditions.forNonCombat().range(8.0D).ignoreLineOfSight();
         private final Guard taskOwner;
         private Guard guardtofollow;
         private double x;
@@ -1352,24 +1369,22 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
 
         @Override
         public boolean canUse() {
-            List<? extends Guard> list = this.taskOwner.level().getEntitiesOfClass(this.taskOwner.getClass(),
-                    this.taskOwner.getBoundingBox().inflate(8.0D, 8.0D, 8.0D));
+            List<? extends Guard> list = this.taskOwner.level().getEntitiesOfClass(this.taskOwner.getClass(), this.taskOwner.getBoundingBox().inflate(8.0D, 8.0D, 8.0D));
             if (!list.isEmpty()) {
                 for (Guard guard : list) {
-                    if (!guard.isInvisible() && guard.getOffhandItem().canPerformAction(ItemAbilities.SHIELD_BLOCK) && guard.isBlocking()
-                            && this.taskOwner.level()
-                            .getNearbyEntities(Guard.class, NEARBY_GUARDS.range(3.0D), guard,
-                                    this.taskOwner.getBoundingBox().inflate(5.0D))
-                            .size() < 5) {
-                        this.guardtofollow = guard;
-                        Vec3 vec3d = this.getPosition();
-                        if (vec3d == null) {
-                            return false;
-                        } else {
-                            this.x = vec3d.x;
-                            this.y = vec3d.y;
-                            this.z = vec3d.z;
-                            return true;
+                    //if (!guard.isInvisible() && guard.getOffhandItem().canPerformAction(ItemAbilities.SHIELD_BLOCK) && guard.isBlocking() && this.taskOwner.level().getEntitiesOfClass(Guard.class, this.taskOwner.getBoundingBox().inflate(5.0D), g -> g != guard && !g.isRemoved()).size() < 5) {
+                    if (!guard.isInvisible() && isActivelyBlocking(guard) && guard.isBlocking() && this.taskOwner.level().getEntitiesOfClass(Guard.class, this.taskOwner.getBoundingBox().inflate(5.0D), g -> g != guard && !g.isRemoved()).size() < 5) {
+                        if (!(taskOwner.getMainHandItem().getItem() instanceof ProjectileWeaponItem)) {
+                            this.guardtofollow = guard;
+                            Vec3 vec3d = this.getPosition();
+                            if (vec3d == null) {
+                                return false;
+                            } else {
+                                this.x = vec3d.x;
+                                this.y = vec3d.y;
+                                this.z = vec3d.z;
+                                return true;
+                            }
                         }
                     }
                 }
@@ -1462,6 +1477,7 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
 
         @Override
         public void tick() {
+            this.mob.setAggressive(true);
             LivingEntity livingentity = this.mob.getTarget();
             if (livingentity != null) {
                 boolean canSee = this.mob.getSensing().hasLineOfSight(livingentity);
@@ -1476,15 +1492,9 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
                 }
                 double d0 = this.mob.distanceToSqr(livingentity);
                 double d1 = livingentity.distanceTo(this.mob);
-                if (d1 <= 4.0D) {
+                if (d1 <= 4.0D && !this.mob.isPatrolling()) {
                     this.mob.getMoveControl().strafe(this.mob.isUsingItem() ? -0.5F : -3.0F, 0.0F);
                     this.mob.lookAt(livingentity, 30.0F, 30.0F);
-                }
-                if (this.mob.getRandom().nextInt(50) == 0) {
-                    if (this.mob.hasPose(Pose.STANDING))
-                        this.mob.setPose(Pose.CROUCHING);
-                    else
-                        this.mob.setPose(Pose.STANDING);
                 }
                 boolean canSee2 = (d0 > (double) this.attackRadiusSqr || this.seeTime < 5) && this.attackDelay == 0;
                 if (canSee2) {
@@ -1499,8 +1509,6 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
                 }
                 this.mob.lookAt(livingentity, 30.0F, 30.0F);
                 this.mob.getLookControl().setLookAt(livingentity, 30.0F, 30.0F);
-                if (friendlyInLineOfSight(this.mob))
-                    this.crossbowState = CrossbowState.FIND_NEW_POSITION;
                 if (this.crossbowState == CrossbowState.FIND_NEW_POSITION) {
                     this.mob.stopUsingItem();
                     this.mob.setChargingCrossbow(false);
@@ -1508,7 +1516,7 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
                         this.mob.getNavigation().moveTo(this.wantedX, this.wantedY, this.wantedZ, this.mob.isCrouching() ? 0.5D : 0.9D);
                     this.crossbowState = CrossbowState.UNCHARGED;
                 } else if (this.crossbowState == CrossbowState.UNCHARGED) {
-                    if (!canSee2) {
+                    if (!canSee2 && !this.mob.isPatrolling() || this.mob.isPatrolling() && canSee && !friendlyInLineOfSight(this.mob)) {
                         this.mob.startUsingItem(ProjectileUtil.getWeaponHoldingHand(this.mob, item -> item instanceof CrossbowItem));
                         this.crossbowState = CrossbowState.CHARGING;
                         this.mob.setChargingCrossbow(true);
@@ -1522,7 +1530,7 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
                     if (i >= CrossbowItem.getChargeDuration(itemstack, this.mob) || CrossbowItem.isCharged(itemstack)) {
                         this.mob.releaseUsingItem();
                         this.crossbowState = CrossbowState.CHARGED;
-                        this.attackDelay = 10 + this.mob.getRandom().nextInt(5);
+                        this.attackDelay = 10;
                         this.mob.setChargingCrossbow(false);
                     }
                 } else if (this.crossbowState == CrossbowState.CHARGED) {
@@ -1531,8 +1539,12 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
                         this.crossbowState = CrossbowState.READY_TO_ATTACK;
                     }
                 } else if (this.crossbowState == CrossbowState.READY_TO_ATTACK && canSee) {
-                    this.mob.performRangedAttack(livingentity, 1.0F);
-                    this.crossbowState = CrossbowState.UNCHARGED;
+                    if (friendlyInLineOfSight(this.mob) && !this.mob.isPatrolling())
+                        this.crossbowState = CrossbowState.FIND_NEW_POSITION;
+                    else {
+                        this.mob.performRangedAttack(livingentity, 1.0F);
+                        this.crossbowState = CrossbowState.UNCHARGED;
+                    }
                 }
             }
 
@@ -1549,7 +1561,7 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
                         Vec3 vector3d = mob.getLookAngle();
                         Vec3 vector3d1 = guard.position().vectorTo(mob.position()).normalize();
                         vector3d1 = new Vec3(vector3d1.x, vector3d1.y, vector3d1.z);
-                        if (vector3d1.dot(vector3d) < 1.0D && mob.hasLineOfSight(guard))
+                        if (vector3d1.dot(vector3d) < GuardConfig.COMMON.friendlyFireCheckValue.get().doubleValue() && mob.hasLineOfSight(guard))
                             return GuardConfig.COMMON.FriendlyFire.get();
                     }
                 }
@@ -1571,10 +1583,7 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
 
         @Nullable
         protected Vec3 getPosition() {
-            if (this.isValidTarget() && this.mob.getTarget().position() != null)
-                return DefaultRandomPos.getPosAway(this.mob, 16, 7, this.mob.getTarget().position());
-            else
-                return DefaultRandomPos.getPos(this.mob, 16, 7);
+            return DefaultRandomPos.getPos(this.mob, 16, 7);
         }
 
         private boolean canRun() {
@@ -1582,11 +1591,7 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
         }
 
         public enum CrossbowState {
-            UNCHARGED,
-            CHARGING,
-            CHARGED,
-            READY_TO_ATTACK,
-            FIND_NEW_POSITION
+            UNCHARGED, CHARGING, CHARGED, READY_TO_ATTACK, FIND_NEW_POSITION
         }
     }
 
@@ -1608,7 +1613,9 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
             if (guard.kickTicks <= 0) {
                 guard.kickTicks = 10;
             }
-            guard.doHurtTarget(guard.getTarget());
+            if (guard.level() instanceof net.minecraft.server.level.ServerLevel serverLevel && guard.getTarget() != null) {
+                guard.doHurtTarget(serverLevel, guard.getTarget());
+            }
         }
 
         @Override
@@ -1627,8 +1634,9 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
 
         @Override
         public boolean canUse() {
-            return !CrossbowItem.isCharged(guard.getMainHandItem()) && (guard.getOffhandItem().getItem().canPerformAction(guard.getOffhandItem(), ItemAbilities.SHIELD_BLOCK) && raiseShield() && guard.shieldCoolDown == 0
-                    && !guard.getOffhandItem().getItem().equals(BuiltInRegistries.ITEM.get(ResourceLocation.fromNamespaceAndPath("piglinproliferation", "buckler"))));
+            ItemStack off = guard.getOffhandItem();
+            boolean hasBlockItem = !off.isEmpty() && off.has(DataComponents.BLOCKS_ATTACKS);
+            return !CrossbowItem.isCharged(guard.getMainHandItem()) && (hasBlockItem && raiseShield() && guard.shieldCoolDown == 0 && !guard.getOffhandItem().getItem().equals(BuiltInRegistries.ITEM.get(Identifier.fromNamespaceAndPath("piglinproliferation", "buckler"))));
         }
 
         @Override
@@ -1638,14 +1646,14 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
 
         @Override
         public void start() {
-            if (guard.getOffhandItem().getItem().canPerformAction(guard.getOffhandItem(), ItemAbilities.SHIELD_BLOCK))
+            ItemStack off = guard.getOffhandItem();
+            if (!off.isEmpty() && off.has(DataComponents.BLOCKS_ATTACKS))
                 guard.startUsingItem(InteractionHand.OFF_HAND);
         }
 
         @Override
         public void stop() {
-            if (!GuardConfig.COMMON.GuardRaiseShield.get())
-                guard.stopUsingItem();
+            if (!GuardConfig.COMMON.GuardRaiseShield.get()) guard.stopUsingItem();
         }
 
         protected boolean raiseShield() {
@@ -1655,43 +1663,6 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
                 return guard.distanceTo(target) <= 4.0D || target instanceof Creeper || target instanceof RangedAttackMob && target.distanceTo(guard) >= 5.0D && !ranged || target instanceof Ravager || GuardConfig.COMMON.GuardRaiseShield.get();
             }
             return false;
-        }
-    }
-
-    public static class RunToClericGoal extends Goal {
-        public final Guard guard;
-        public Villager cleric;
-
-        public RunToClericGoal(Guard guard) {
-            this.guard = guard;
-        }
-
-        @Override
-        public boolean canUse() {
-            List<Villager> list = this.guard.level().getEntitiesOfClass(Villager.class, this.guard.getBoundingBox().inflate(10.0D, 3.0D, 10.0D));
-            if (!list.isEmpty()) {
-                for (Villager mob : list) {
-                    if (mob != null) {
-                        if (mob.getVillagerData().getProfession() == VillagerProfession.CLERIC && guard.getHealth() < guard.getMaxHealth() && guard.getTarget() == null && !guard.hasEffect(MobEffects.REGENERATION) && !mob.isSleeping()) {
-                            this.cleric = mob;
-                            return GuardConfig.COMMON.ClericHealing.get();
-                        }
-                    }
-                }
-            }
-            return false;
-        }
-
-        @Override
-        public void tick() {
-            guard.lookAt(cleric, 30.0F, 30.0F);
-            guard.getLookControl().setLookAt(cleric, 30.0F, 30.0F);
-            if (guard.distanceTo(cleric) >= 6.0D) {
-                guard.getNavigation().moveTo(cleric, 0.5D);
-            } else {
-                guard.getMoveControl().strafe(-1.0F, 0.0F);
-                guard.getNavigation().stop();
-            }
         }
     }
 
@@ -1775,6 +1746,9 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
     public static class WalkBackToCheckPointGoal extends Goal {
         private final Guard guard;
         private final double speed;
+        private long delayTime = 0L;
+        private int ticksRan = 0;
+        private boolean stop = false;
 
         public WalkBackToCheckPointGoal(Guard guard, double speedIn) {
             this.guard = guard;
@@ -1784,26 +1758,202 @@ public class Guard extends PathfinderMob implements CrossbowAttackMob, RangedAtt
 
         @Override
         public boolean canUse() {
-            return guard.getTarget() == null && guard.getPatrolPos() != null && this.guard.blockPosition() != this.guard.getPatrolPos() && !guard.isFollowing() && guard.isPatrolling();
+            return guard.getTarget() == null && this.guard.getPatrolPos() != null && !this.guard.blockPosition().equals(this.guard.getPatrolPos()) && !guard.isFollowing() && guard.isPatrolling() && (guard.level().getGameTime() - delayTime) > 200L;
         }
 
         @Override
         public boolean canContinueToUse() {
-            return this.canUse() && this.guard.getNavigation().isInProgress();
+            return this.canUse() && this.guard.getNavigation().isInProgress() && stop;
         }
 
         @Override
         public void start() {
+            if (ticksRan > 200) this.ticksRan = 0;
             BlockPos blockpos = this.guard.getPatrolPos();
-            if (blockpos != null) {
-                Vec3 vector3d = Vec3.atCenterOf(blockpos);
-                this.guard.getNavigation().moveTo(vector3d.x, vector3d.y, vector3d.z, this.speed);
+            if (blockpos != null && !this.guard.blockPosition().equals(this.guard.getPatrolPos())) {
+                Path path = this.guard.getNavigation().createPath(blockpos, 0);
+                this.guard.getNavigation().moveTo(path, this.speed);
             }
+        }
+
+        @Override
+        public void tick() {
+            if (this.guard.getNavigation().getPath() != null && !this.guard.getNavigation().getPath().canReach())
+                this.ticksRan++;
+            if (this.guard.getNavigation().getPath() != null && !this.guard.getNavigation().getPath().canReach() && !this.guard.blockPosition().equals(this.guard.getPatrolPos()) && ticksRan > 200)
+                this.stop = true;
+        }
+
+        @Override
+        public void stop() {
+            if (stop) this.delayTime = this.guard.level().getGameTime();
+            this.guard.getNavigation().stop();
+            this.stop = false;
         }
 
         @Override
         public boolean requiresUpdateEveryTick() {
             return true;
+        }
+    }
+
+    public static class PassiveMobSpearUseGoal<T extends Guard> extends Goal {
+        static final double MAX_FLEEING_TIME = reducedTickDelay(100);
+        private final T mob;
+        private SpearUseState state;
+        double speedModifierWhenCharging;
+        double speedModifierWhenRepositioning;
+        float approachDistanceSq;
+        float targetInRangeRadiusSq;
+
+        public PassiveMobSpearUseGoal(T mob, double speedModifierWhenCharging, double speedModifierWhenRepositioning, float attackRadius, float targetInRange) {
+            this.mob = mob;
+            this.speedModifierWhenCharging = speedModifierWhenCharging;
+            this.speedModifierWhenRepositioning = speedModifierWhenRepositioning;
+            this.approachDistanceSq = attackRadius * attackRadius;
+            this.targetInRangeRadiusSq = targetInRange * targetInRange;
+            this.setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
+        }
+
+        @Override
+        public boolean canUse() {
+            return this.ableToAttack() && !this.mob.isUsingItem() && !RangedCrossbowAttackPassiveGoal.friendlyInLineOfSight(this.mob);
+        }
+
+        private boolean ableToAttack() {
+            return this.mob.getTarget() != null && this.mob.getMainHandItem().has(DataComponents.KINETIC_WEAPON);
+        }
+
+        private int getKineticWeaponUseDuration() {
+            int i = Optional.ofNullable(this.mob.getMainHandItem().get(DataComponents.KINETIC_WEAPON)).map(KineticWeapon::computeDamageUseDuration).orElse(0);
+            return reducedTickDelay(i);
+        }
+
+        @Override
+        public boolean canContinueToUse() {
+            return this.state != null && !this.state.done && this.ableToAttack() && !RangedCrossbowAttackPassiveGoal.friendlyInLineOfSight(this.mob);
+        }
+
+        @Override
+        public void start() {
+            super.start();
+            this.mob.setAggressive(true);
+            this.state = new SpearUseState();
+        }
+
+        @Override
+        public void stop() {
+            super.stop();
+            this.mob.getNavigation().stop();
+            this.mob.setAggressive(false);
+            this.state = null;
+            this.mob.stopUsingItem();
+        }
+
+        @Override
+        public void tick() {
+            if (this.state != null) {
+                LivingEntity livingentity = this.mob.getTarget();
+                double d0 = this.mob.distanceToSqr(livingentity.getX(), livingentity.getY(), livingentity.getZ());
+                Entity entity = this.mob.getRootVehicle();
+                float f = 1.0F;
+                if (entity instanceof Mob mob) {
+                    f = 1.4F;
+                }
+
+                int i = this.mob.isPassenger() ? 2 : 0;
+                this.mob.lookAt(livingentity, 30.0F, 30.0F);
+                this.mob.getLookControl().setLookAt(livingentity, 30.0F, 30.0F);
+                if (this.state.notEngagedYet()) {
+                    if (d0 > this.approachDistanceSq && !RangedCrossbowAttackPassiveGoal.friendlyInLineOfSight(this.mob)) {
+                        this.mob.getNavigation().moveTo(livingentity, f * this.speedModifierWhenRepositioning);
+                        return;
+                    }
+
+                    this.state.startEngagement(this.getKineticWeaponUseDuration());
+                    this.mob.startUsingItem(InteractionHand.MAIN_HAND);
+                }
+
+                if (this.state.tickAndCheckEngagement()) {
+                    this.mob.stopUsingItem();
+                    double d1 = Math.sqrt(d0);
+                    this.state.awayPos = LandRandomPos.getPosAway(this.mob, Math.max(0.0, 9 + i - d1), Math.max(1.0, 11 + i - d1), 7, livingentity.position());
+                    this.state.fleeingTime = 1;
+                }
+
+                if (!this.state.tickAndCheckFleeing()) {
+                    if (this.state.awayPos != null) {
+                        this.mob.getNavigation().moveTo(this.state.awayPos.x, this.state.awayPos.y, this.state.awayPos.z, f * this.speedModifierWhenRepositioning);
+                        if (this.mob.getNavigation().isDone()) {
+                            if (this.state.fleeingTime > 0) {
+                                this.state.done = true;
+                                return;
+                            }
+
+                            this.state.awayPos = null;
+                        }
+                    } else {
+                        this.mob.getNavigation().moveTo(livingentity, f * this.speedModifierWhenCharging);
+                        if (d0 < this.targetInRangeRadiusSq || this.mob.getNavigation().isDone()) {
+                            double d2 = Math.sqrt(d0);
+                            this.state.awayPos = LandRandomPos.getPosAway(this.mob, 6 + i - d2, 7 + i - d2, 7, livingentity.position());
+                        }
+                    }
+                }
+            }
+        }
+
+        public static class SpearUseState {
+            private int engageTime = -1;
+            int fleeingTime = -1;
+            @org.jspecify.annotations.Nullable
+            Vec3 awayPos;
+            boolean done = false;
+
+            public boolean notEngagedYet() {
+                return this.engageTime < 0;
+            }
+
+            public void startEngagement(int engageTime) {
+                this.engageTime = engageTime;
+            }
+
+            public boolean tickAndCheckEngagement() {
+                if (this.engageTime > 0) {
+                    this.engageTime--;
+                    if (this.engageTime == 0) {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            public boolean tickAndCheckFleeing() {
+                if (this.fleeingTime > 0) {
+                    this.fleeingTime++;
+                    if (this.fleeingTime > MAX_FLEEING_TIME) {
+                        this.done = true;
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+    }
+
+    public static class GuardGroundPathNavigation extends GroundPathNavigation {
+        private final Guard guard;
+
+        public GuardGroundPathNavigation(Guard guard, Level level) {
+            super(guard, level);
+            this.guard = guard;
+        }
+
+        @Override
+        public boolean isDone() {
+            return (guard.isPatrolling() && guard.getTarget() == null && guard.blockPosition().equals(guard.getPatrolPos())) || super.isDone();
         }
     }
 }
